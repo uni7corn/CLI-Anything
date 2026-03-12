@@ -221,6 +221,89 @@ The TEST.md now serves as both the test plan (written before implementation) and
 the test results documentation (appended after execution), providing a complete
 record of the testing process.
 
+### Phase 6.5: SKILL.md Generation
+
+Generate a SKILL.md file that makes the CLI discoverable and usable by AI agents
+through the skill-creator methodology. This file serves as a self-contained skill
+definition that can be loaded by Claude Code or other AI assistants.
+
+**Purpose:** SKILL.md files follow a standard format that enables AI agents to:
+- Discover the CLI's capabilities
+- Understand command structure and usage
+- Generate correct command invocations
+- Handle output programmatically
+
+**SKILL.md Structure:**
+
+1. **YAML Frontmatter** — Triggering metadata for skill discovery:
+   ```yaml
+   ---
+   name: "cli-anything-<software>"
+   description: "Brief description of what the CLI does"
+   ---
+   ```
+
+2. **Markdown Body** — Usage instructions including:
+   - Installation prerequisites
+   - Basic command syntax
+   - Command groups and their functions
+   - Usage examples
+   - Agent-specific guidance (JSON output, error handling)
+
+**Generation Process:**
+
+1. **Extract CLI metadata** using `skill_generator.py`:
+   ```python
+   from skill_generator import generate_skill_file
+
+   skill_path = generate_skill_file(
+       harness_path="/path/to/agent-harness",
+       output_path="skills/<software>_SKILL.md"
+   )
+   ```
+
+2. **The generator automatically extracts:**
+   - Software name and version from setup.py
+   - Command groups from the CLI file (Click decorators)
+   - Documentation from README.md
+   - System package requirements
+
+3. **Customize the template** (optional):
+   - Default template: `templates/SKILL.md.template`
+   - Uses Jinja2 placeholders for dynamic content
+   - Can be extended for software-specific sections
+
+**Output Location:**
+
+By default, SKILL.md files are generated in the `skills/` directory:
+```
+<software>/
+└── agent-harness/
+    └── skills/
+        └── <software>_SKILL.md
+```
+
+**Manual Generation:**
+
+```bash
+cd cli-anything-plugin
+python skill_generator.py /path/to/software/agent-harness -o skills/software_SKILL.md
+```
+
+**Integration with CLI Build:**
+
+The SKILL.md generation should be run after Phase 6 (Test Documentation) completes
+successfully, ensuring the CLI is fully documented and tested before creating the
+skill definition.
+
+**Key Principles:**
+
+- SKILL.md must be self-contained (no external dependencies for understanding)
+- Include agent-specific guidance for programmatic usage
+- Document `--json` flag usage for machine-readable output
+- List all command groups with brief descriptions
+- Provide realistic examples that demonstrate common workflows
+
 ## Critical Lessons Learned
 
 ### Use the Real Software — Don't Reimplement It
