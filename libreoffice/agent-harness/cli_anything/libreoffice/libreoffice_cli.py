@@ -17,6 +17,7 @@ Usage:
 import sys
 import os
 import json
+import shlex
 import click
 from typing import Optional
 
@@ -30,6 +31,7 @@ from cli_anything.libreoffice.core import calc as calc_mod
 from cli_anything.libreoffice.core import impress as impress_mod
 from cli_anything.libreoffice.core import styles as styles_mod
 from cli_anything.libreoffice.core import export as export_mod
+from cli_anything.libreoffice.core import importer as import_mod
 
 # Global session state
 _session: Optional[Session] = None
@@ -116,8 +118,10 @@ def handle_error(func):
 @click.option("--json", "use_json", is_flag=True, help="Output as JSON")
 @click.option("--project", "project_path", type=str, default=None,
               help="Path to .lo-cli.json project file")
+@click.option("--dry-run", "dry_run", is_flag=True, default=False,
+              help="Run command without saving changes to disk")
 @click.pass_context
-def cli(ctx, use_json, project_path):
+def cli(ctx, use_json, project_path, dry_run):
     """LibreOffice CLI -- Stateful document editing from the command line.
 
     Run without a subcommand to enter interactive REPL mode.
@@ -133,6 +137,21 @@ def cli(ctx, use_json, project_path):
 
     if ctx.invoked_subcommand is None:
         ctx.invoke(repl, project_path=None)
+
+
+@cli.result_callback()
+def auto_save_on_exit(result, use_json, project_path, dry_run, **kwargs):
+    """Auto-save project after one-shot commands if state was modified."""
+    if _repl_mode:
+        return
+    if dry_run:
+        return
+    sess = get_session()
+    if sess.has_project() and sess._modified and sess.project_path:
+        try:
+            sess.save_session()
+        except Exception as e:
+            click.echo(f"Warning: Auto-save failed: {e}", err=True)
 
 
 # ── Document Commands ────────────────────────────────────────────
@@ -163,14 +182,57 @@ def document_new(doc_type, name, profile, output_path):
 
 @document.command("open")
 @click.argument("path")
+@click.option("--output", "-o", "output_path", type=str, default=None,
+              help="Save imported Office/ODF files to this project JSON path")
+@click.option("--name", "-n", type=str, default=None,
+              help="Override imported project name")
 @handle_error
-def document_open(path):
-    """Open an existing project file."""
+def document_open(path, output_path, name):
+    """Open a project JSON file, or import an existing Office/ODF file."""
+    if import_mod.can_import(path):
+        proj = import_mod.import_document(path, name=name)
+        sess = get_session()
+        sess.set_project(proj, output_path)
+        if output_path:
+            doc_mod.save_document(proj, output_path)
+        info = doc_mod.get_document_info(proj)
+        info["source_path"] = proj.get("metadata", {}).get("source_path")
+        info["project_path"] = output_path
+        output(info, f"Imported: {path}")
+        return
+
     proj = doc_mod.open_document(path)
     sess = get_session()
     sess.set_project(proj, path)
     info = doc_mod.get_document_info(proj)
     output(info, f"Opened: {path}")
+
+
+@document.command("import")
+@click.argument("path")
+@click.option("--output", "-o", "output_path", required=True,
+              help="Project JSON path to create")
+@click.option("--name", "-n", type=str, default=None,
+              help="Override imported project name")
+@handle_error
+def document_import(path, output_path, name):
+    """Import an existing Office/ODF file into a project JSON file."""
+    proj = import_mod.import_document(path, name=name)
+    doc_mod.save_document(proj, output_path)
+    sess = get_session()
+    sess.set_project(proj, output_path)
+    info = doc_mod.get_document_info(proj)
+    info["source_path"] = proj.get("metadata", {}).get("source_path")
+    info["project_path"] = output_path
+    output(info, f"Imported: {path}")
+
+
+@document.command("import-formats")
+@handle_error
+def document_import_formats():
+    """List supported import formats."""
+    formats = import_mod.list_import_formats()
+    output(formats, "Supported import formats:")
 
 
 @document.command("save")
@@ -703,7 +765,10 @@ def repl(project_path):
                 _repl_help(skin)
                 continue
 
-            args = line.split()
+            try:
+                args = shlex.split(line)
+            except ValueError:
+                args = line.split()
             try:
                 cli.main(args, standalone_mode=False)
             except SystemExit:
@@ -722,7 +787,7 @@ def repl(project_path):
 
 def _repl_help(skin=None):
     commands = {
-        "document new|open|save|info|profiles|json": "Document management",
+        "document new|open|import|import-formats|save|info|profiles|json": "Document management",
         "writer add-paragraph|add-heading|add-list|add-table|add-page-break|remove|list|set-text": "Writer editing",
         "calc add-sheet|remove-sheet|rename-sheet|set-cell|get-cell|list-sheets": "Spreadsheet editing",
         "impress add-slide|remove-slide|set-content|list-slides|add-element": "Presentation editing",
